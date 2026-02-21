@@ -3,6 +3,7 @@ package com.example.docupro.utils
 import android.content.Context
 import android.net.Uri
 import com.example.docupro.models.Associate
+import com.example.docupro.models.SettingsData
 import org.apache.poi.ss.usermodel.WorkbookFactory
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -63,4 +64,6 @@ object ScheduleImporter {
         }
         return newAssociates
     }
+
+    fun importFromExcel(context: Context, uri: Uri, settings: SettingsData) {}
 }
