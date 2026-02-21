@@ -1,10 +1,6 @@
-//DocuPro: Documentation for the modern Sheetz Supervisor.
-//Dreamt up by Brandon Case,
-//Brought to life by Google's Gemini.
-//Thank you Google for enabling this project of mine.
-
 package com.example.docupro
 
+// ... existing imports ...
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -18,22 +14,23 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.edit
 import com.example.docupro.models.*
 import com.example.docupro.ui.*
+import com.example.docupro.utils.StatementGenerator
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
 
@@ -51,7 +48,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        sharedPrefs = getSharedPreferences("DocuProPrefs", Context.MODE_PRIVATE)
+        sharedPrefs = getSharedPreferences("DocuProPrefs", MODE_PRIVATE)
 
         setContent {
             var settings by remember { mutableStateOf(loadSettings()) }
@@ -74,7 +71,7 @@ class MainActivity : ComponentActivity() {
                             Text("DocuPro", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold, fontSize = 24.sp)
                             HorizontalDivider()
                             NavigationDrawerItem(label = { Text("Home") }, selected = currentScreen == "Home", onClick = { currentScreen = "Home"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Home, null) })
-                            NavigationDrawerItem(label = { Text("Logs") }, selected = currentScreen == "Logs", onClick = { currentScreen = "Logs"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.List, null) })
+                            NavigationDrawerItem(label = { Text("Logs") }, selected = currentScreen == "Logs", onClick = { currentScreen = "Logs"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.AutoMirrored.Filled.List, null) })
                             NavigationDrawerItem(label = { Text("Statements") }, selected = currentScreen == "Statements", onClick = { currentScreen = "Statements"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Email, null) })
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             NavigationDrawerItem(label = { Text("Settings") }, selected = currentScreen == "Settings", onClick = { currentScreen = "Settings"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Settings, null) })
@@ -132,11 +129,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadSettings() = gson.fromJson(sharedPrefs.getString("settings", "{}"), SettingsData::class.java) ?: SettingsData()
-    private fun saveSettings(s: SettingsData) = sharedPrefs.edit().putString("settings", gson.toJson(s)).apply()
+    private fun saveSettings(s: SettingsData) = sharedPrefs.edit { putString("settings", gson.toJson(s)) }
     private fun loadAssociates(): List<Associate> = gson.fromJson(sharedPrefs.getString("associates", "[]"), object : TypeToken<List<Associate>>() {}.type)
-    private fun saveAssociates(a: List<Associate>) = sharedPrefs.edit().putString("associates", gson.toJson(a)).apply()
+    private fun saveAssociates(a: List<Associate>) = sharedPrefs.edit { putString("associates", gson.toJson(a)) }
     private fun loadIncidents(): List<Incident> = gson.fromJson(sharedPrefs.getString("incidents", "[]"), object : TypeToken<List<Incident>>() {}.type)
-    private fun saveIncidents(i: List<Incident>) = sharedPrefs.edit().putString("incidents", gson.toJson(i)).apply()
+    private fun saveIncidents(i: List<Incident>) = sharedPrefs.edit { putString("incidents", gson.toJson(i)) }
 }
 
 @Composable
@@ -170,6 +167,11 @@ fun LogsList(incidents: List<Incident>, associates: List<Associate>) {
                     }
                     Text(inc.type, color = if(inc.type == "OSHA") Color(0xFFEAB308) else Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                     Text(inc.details, style = MaterialTheme.typography.bodyMedium)
+
+                    if (inc.witnesses.isNotBlank()) {
+                        Text("Witnesses: ${inc.witnesses}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+
                     if (inc.actionDetails.isNotBlank()) {
                         Text("Action: ${inc.action} - ${inc.actionDetails}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
@@ -181,20 +183,27 @@ fun LogsList(incidents: List<Incident>, associates: List<Associate>) {
 
 @Composable
 fun StatementsList(incidents: List<Incident>, associates: List<Associate>, settings: SettingsData, onExport: (String, String) -> Unit) {
+    // Grab the context so we can read the asset file
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Group incidents by active associates
+    val associatesWithIncidents = associates.filter { assoc -> incidents.any { it.associateId == assoc.id } }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(incidents.reversed()) { inc ->
-            val assoc = associates.find { it.id == inc.associateId }
-            if (assoc != null) {
-                Card(Modifier.fillMaxWidth().clickable {
-                    val txt = StatementGenerator.generateForIncident(inc, assoc, settings)
-                    onExport(txt, "Statement_${assoc.name.replace(" ", "_")}.txt")
-                }) {
-                    ListItem(
-                        headlineContent = { Text("Generate Statement for ${assoc.name}") },
-                        supportingContent = { Text("Type: ${inc.type} | Date: ${inc.timestamp.take(10)}") },
-                        trailingContent = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) }
-                    )
-                }
+        items(associatesWithIncidents) { assoc ->
+            val assocIncidents = incidents.filter { it.associateId == assoc.id }
+            val isDismissed = assocIncidents.any { it.action == "Dismissal from Work" }
+
+            Card(Modifier.fillMaxWidth().clickable {
+                // Pass the Context, the List of Incidents, the Associate, and Settings
+                val txt = StatementGenerator.generateCombinedStatement(context, assocIncidents, assoc, settings)
+                onExport(txt, "Combined_Statement_${assoc.name.replace(" ", "_")}.txt")
+            }) {
+                ListItem(
+                    headlineContent = { Text("Generate Statement for ${assoc.name}") },
+                    supportingContent = { Text("Contains ${assocIncidents.size} incidents ${if (isDismissed) "(Including Dismissal)" else ""}") },
+                    trailingContent = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) }
+                )
             }
         }
     }

@@ -4,25 +4,38 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 object ShiftUtils {
-    fun getShiftStart(shiftStartTime: String): LocalDateTime {
+
+    fun getShiftStart(shiftStartStr: String): LocalDateTime {
+        val startTime = try { LocalTime.parse(shiftStartStr) } catch (_: Exception) { LocalTime.now() }
         val now = LocalDateTime.now()
-        val time = try { LocalTime.parse(shiftStartTime) } catch (e: Exception) { LocalTime.of(21, 0) }
-        var start = now.with(time)
-        // If it's 2 AM and shift started at 9 PM, shift start was yesterday
-        if (now.toLocalTime().isBefore(time) && time.hour > 12) {
-            start = start.minusDays(1)
+
+        // If it's early morning (e.g. 2 AM) and the shift started at 10 PM, the start time was yesterday
+        return if (now.toLocalTime().isBefore(startTime) && startTime.hour > 12) {
+            LocalDateTime.of(now.toLocalDate().minusDays(1), startTime)
+        } else {
+            LocalDateTime.of(now.toLocalDate(), startTime)
         }
-        return start
     }
 
-    fun getShiftEnd(shiftStartTime: String, shiftEndTime: String): LocalDateTime {
-        val start = getShiftStart(shiftStartTime)
-        val end = try { LocalTime.parse(shiftEndTime) } catch (e: Exception) { LocalTime.of(7, 30) }
-        var endDateTime = start.with(end)
-        // If shift ends at 7 AM but started at 9 PM, end time is tomorrow relative to start
-        if (end.isBefore(LocalTime.parse(shiftStartTime))) {
-            endDateTime = endDateTime.plusDays(1)
+    fun getShiftEnd(shiftStartStr: String, shiftEndStr: String): LocalDateTime {
+        val start = getShiftStart(shiftStartStr)
+        val endTime = try { LocalTime.parse(shiftEndStr) } catch (_: Exception) { LocalTime.now().plusHours(8) }
+
+        var end = LocalDateTime.of(start.toLocalDate(), endTime)
+
+        // If end time is technically before start time (e.g. 06:00 is before 22:00), it rolled over to the next day
+        if (endTime.isBefore(start.toLocalTime())) {
+            end = end.plusDays(1)
         }
-        return endDateTime
+        return end
+    }
+
+    fun isCurrentlyInShift(startStr: String, endStr: String): Boolean {
+        val now = LocalDateTime.now()
+        val start = getShiftStart(startStr)
+        val end = getShiftEnd(startStr, endStr)
+
+        // Return true if current time is within the shift block
+        return !now.isBefore(start) && !now.isAfter(end)
     }
 }

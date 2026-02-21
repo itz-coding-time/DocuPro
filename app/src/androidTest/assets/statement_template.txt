@@ -1,0 +1,23 @@
+Employee Name: {EMP_NAME} Employee ID: {EMP_ID} Store #: {STORE_NUM} Date: {DATE} Position: ____________________
+
+Describe in detail WHAT happened (stick to facts only and what you experienced or witnessed first-hand). {WHAT_HAPPENED}
+
+Employee Name: {EMP_NAME} Employee ID: {EMP_ID} Store #: {STORE_NUM} Date: {DATE} Position: ____________________
+
+Describe in detail WHEN the incident(s) occurred (please list dates and times). Has this happened before or is there a history of this? {WHEN_OCCURRED}
+
+Describe in detail WHERE the incident(s) occurred (be very descriptive of the location). {WHERE_OCCURRED}
+
+Please provide the names of any WITNESS(ES). {WITNESSES}
+
+Have you told anyone else about this? If yes, who and when? And what exactly did you tell them? {TOLD_ANYONE}
+
+Employee Name: {EMP_NAME} Employee ID: {EMP_ID} Store #: {STORE_NUM} Date: {DATE} Position: ____________________
+
+How did this make you feel? [Automatically Generated Management Documentation - N/A]
+
+What would a satisfactory resolution of this situation look/feel like to you? [Automatically Generated Management Documentation - N/A]
+
+Any additional comments or information you think Sheetz needs to know about this situation? {ADDITIONAL_COMMENTS}
+
+Please attach any photos, text messages, social media posts, or any additional information that might support your statement. Please contact Employee Relations prior to sending any photos or content that is explicit or sexual in nature. Signature: _______________________________ Date: ____________________ Please print, sign, and date this form. This form can be emailed to your Employee Relations representative. You may attach additional pages, if necessary.
