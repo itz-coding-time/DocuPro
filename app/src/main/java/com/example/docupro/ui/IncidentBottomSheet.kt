@@ -56,7 +56,7 @@ fun IncidentBottomSheet(
     var violationType by remember { mutableStateOf("OSHA") }
 
     // --- NARRATIVE BUILDER STATES ---
-    var reportMode by remember { mutableStateOf("Manual") } // Manual, Witnessed, Reported, Both
+    var reportMode by remember { mutableStateOf("Reported") } // Default to Reported as requested
     var manualDetails by remember { mutableStateOf("") }
     var reporterName by remember { mutableStateOf("") }
     var actionObserved by remember { mutableStateOf("") }
@@ -76,11 +76,16 @@ fun IncidentBottomSheet(
     // --- PROGRESSIVE DISCIPLINE CALCULATIONS ---
     val historyCount = remember(selectedAssociateId, violationType, existingIncidents) {
         if (selectedAssociateId.isEmpty()) 0
-        else existingIncidents.count { it.associateId == selectedAssociateId && it.type == violationType }
+        else existingIncidents.count {
+            // Only count previous incidents that were actually acted upon (Warn/Dismiss), not just unwitnessed logs
+            it.associateId == selectedAssociateId && it.type == violationType && it.action != "Logged"
+        }
     }
 
-    val actionTaken = remember(historyCount, violationType, selectedAssociateId) {
-        if (selectedAssociateId.isEmpty()) "Warn"
+    val actionTaken = remember(historyCount, violationType, selectedAssociateId, reportMode) {
+        // If it's unwitnessed ("Reported"), we cannot issue a corrective action.
+        if (reportMode == "Reported") "Logged"
+        else if (selectedAssociateId.isEmpty()) "Warn"
         else when (violationType) {
             "OSHA" -> if (historyCount == 0) "Warn" else "Dismissal from Work"
             "Hostility" -> if (historyCount < 2) "Warn" else "Dismissal from Work"
@@ -251,15 +256,24 @@ fun IncidentBottomSheet(
                         }
 
                         Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val textColor = if (chipColor.value.luminance() > 0.5f) Color.Black else Color.White
-                            FilterChip(
-                                selected = actionTaken == "Warn", onClick = { }, label = { Text("Warn") },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Warn") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Warn") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
-                            )
-                            FilterChip(
-                                selected = actionTaken == "Dismissal from Work", onClick = { }, label = { Text("Dismiss") },
-                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Dismissal from Work") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Dismissal from Work") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
-                            )
+                            if (reportMode == "Reported") {
+                                // Locked state for unwitnessed reports
+                                FilterChip(
+                                    selected = true, onClick = { }, label = { Text("Logged Only (Unwitnessed)") },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                )
+                            } else {
+                                // Normal corrective actions for Witnessed/Both/Manual
+                                val textColor = if (chipColor.value.luminance() > 0.5f) Color.Black else Color.White
+                                FilterChip(
+                                    selected = actionTaken == "Warn", onClick = { }, label = { Text("Warn") },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Warn") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Warn") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
+                                )
+                                FilterChip(
+                                    selected = actionTaken == "Dismissal from Work", onClick = { }, label = { Text("Dismiss") },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Dismissal from Work") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Dismissal from Work") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
+                                )
+                            }
                         }
                     }
                 }
@@ -267,6 +281,7 @@ fun IncidentBottomSheet(
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = actionDetails, onValueChange = { actionDetails = it }, label = { Text("Action Notes (What was said?)") }, modifier = Modifier.fillMaxWidth())
 
+                // These dynamic questions are naturally hidden when reportMode is "Reported" because actionTaken evaluates to "Logged"
                 if (actionTaken == "Warn") {
                     Text("Did they comply?", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
