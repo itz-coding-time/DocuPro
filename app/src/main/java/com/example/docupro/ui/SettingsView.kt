@@ -88,16 +88,56 @@ fun SettingsView(
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             item {
-                Text("General Settings", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
+                // ... existing code ...
                 OutlinedTextField(
                     value = settings.storeNumber,
                     onValueChange = { onSettingsSaved(settings.copy(storeNumber = it)) },
                     label = { Text("Store Number") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(16.dp))
+
+                // --- SHIFT TIME SCHEDULER ---
+                Text("Shift Schedule (24h Time)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val parts = settings.shiftStart.split(":")
+                            val h = parts.getOrNull(0)?.toIntOrNull() ?: 22
+                            val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                            android.app.TimePickerDialog(context, { _, hh, mm ->
+                                onSettingsSaved(settings.copy(shiftStart = String.format("%02d:%02d", hh, mm)))
+                            }, h, m, true).show() // true = 24h format
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Start: ${settings.shiftStart}") }
+
+                    OutlinedButton(
+                        onClick = {
+                            val parts = settings.shiftEnd.split(":")
+                            val h = parts.getOrNull(0)?.toIntOrNull() ?: 6
+                            val m = parts.getOrNull(1)?.toIntOrNull() ?: 30
+                            android.app.TimePickerDialog(context, { _, hh, mm ->
+                                onSettingsSaved(settings.copy(shiftEnd = String.format("%02d:%02d", hh, mm)))
+                            }, h, m, true).show() // true = 24h format
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("End: ${settings.shiftEnd}") }
+                }
+
+                // --- DEBUG BYPASS ---
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Checkbox(
+                        checked = settings.debugBypassShiftTime,
+                        onCheckedChange = { onSettingsSaved(settings.copy(debugBypassShiftTime = it)) }
+                    )
+                    Text("Bypass Shift Time Restrictions (Debug Mode)", style = MaterialTheme.typography.bodyMedium)
+                }
+
                 HorizontalDivider(Modifier.padding(vertical = 16.dp))
             }
+// ... existing code ...         }
 
             // --- CAMERA MANIFEST ---
             item {

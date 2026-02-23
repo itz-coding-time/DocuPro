@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
 import androidx.core.content.edit
 import com.example.docupro.models.*
 import com.example.docupro.ui.*
@@ -95,7 +96,7 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.padding(p).fillMaxSize()) {
                             when (currentScreen) {
                                 "Home" -> HomeDashboard(incidents)
-                                "Logs" -> LogsList(incidents, associates)
+                                "Logs" -> LogsView (incidents, associates)
                                 "Statements" -> StatementsList(incidents, associates, settings) { txt, name ->
                                     exportContent = txt
                                     createDocumentLauncher.launch(name)
@@ -154,33 +155,123 @@ fun HomeDashboard(incidents: List<Incident>) {
     }
 }
 
+// ... existing code ...
+// ... existing code ...
 @Composable
-fun LogsList(incidents: List<Incident>, associates: List<Associate>) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(incidents.reversed()) { inc ->
-            val name = associates.find { it.id == inc.associateId }?.name ?: "Unknown"
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(name, fontWeight = FontWeight.Bold)
-                        Text(inc.timestamp.take(16).replace("T", " "), style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text(inc.type, color = if(inc.type == "OSHA") Color(0xFFEAB308) else Color(0xFFEF4444), fontWeight = FontWeight.Bold)
-                    Text(inc.details, style = MaterialTheme.typography.bodyMedium)
+fun LogsView(incidents: List<Incident>, associates: List<Associate>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
-                    if (inc.witnesses.isNotBlank()) {
-                        Text("Witnesses: ${inc.witnesses}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+    Column(modifier = Modifier.padding(16.dp).fillMaxSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("Incident Logs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+
+            // Dummy Clear Logs Button
+            IconButton(onClick = {
+                android.widget.Toast.makeText(
+                    context,
+                    "Continuous recorder active. Clear App Cache in Android settings to wipe logs.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }) {
+                Icon(
+                    androidx.compose.material.icons.Icons.Default.Delete,
+                    contentDescription = "Clear Logs Info",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (incidents.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No incidents logged yet.", color = androidx.compose.ui.graphics.Color.Gray)
+            }
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
+                // QOL: Bundle reports by Associate!
+                val groupedIncidents = incidents.groupBy { it.associateId }
+
+                groupedIncidents.forEach { (associateId, associateIncidents) ->
+                    val associateName = associates.find { it.id == associateId }?.name ?: "Unknown Associate"
+
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        ) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(androidx.compose.material.icons.Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Spacer(Modifier.width(8.dp))
+                                Text(associateName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Spacer(Modifier.weight(1f))
+                                Badge { Text("${associateIncidents.size}") }
+                            }
+                        }
                     }
 
-                    if (inc.actionDetails.isNotBlank()) {
-                        Text("Action: ${inc.action} - ${inc.actionDetails}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    items(associateIncidents.sortedByDescending { it.timestamp }) { incident ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 8.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(incident.type, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.weight(1f))
+
+                                    // Format timestamp nicely
+                                    val timeStr = try {
+                                        val dt = java.time.LocalDateTime.parse(incident.timestamp)
+                                        val formatter = java.time.format.DateTimeFormatter.ofPattern("MMM dd, HH:mm")
+                                        dt.format(formatter)
+                                    } catch (e: Exception) { incident.timestamp.take(10) }
+
+                                    Text(timeStr, style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(incident.details, style = MaterialTheme.typography.bodyMedium)
+
+                                if (incident.actionDetails.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                        Text("Notes: ${incident.actionDetails}", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                                    }
+                                }
+
+                                Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    // QOL: Copy to Clipboard for easy pasting into standard systems!
+                                    TextButton(
+                                        onClick = {
+                                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(incident.details))
+                                            android.widget.Toast.makeText(context, "Narrative Copied!", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    ) {
+                                        Text("COPY NARRATIVE", style = MaterialTheme.typography.labelSmall)
+                                    }
+
+                                    FilterChip(
+                                        selected = true,
+                                        onClick = { },
+                                        label = { Text(incident.action, style = MaterialTheme.typography.labelSmall) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                                            selectedLabelColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 }
-
+// ... existing code ...
 @Composable
 fun StatementsList(incidents: List<Incident>, associates: List<Associate>, settings: SettingsData, onExport: (String, String) -> Unit) {
     // Grab the context so we can read the asset file
