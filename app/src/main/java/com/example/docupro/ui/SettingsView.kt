@@ -6,6 +6,7 @@
 package com.example.docupro.ui
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.example.docupro.models.Associate
 import com.example.docupro.models.Camera
 import com.example.docupro.models.SettingsData
+import com.example.docupro.utils.ConfigManager
 import com.example.docupro.utils.ScheduleImporter
 
 @Composable
@@ -36,8 +38,10 @@ fun SettingsView(
     val context = LocalContext.current
     var associatesExpanded by remember { mutableStateOf(false) }
     var camerasExpanded by remember { mutableStateOf(false) }
+    var locationsExpanded by remember { mutableStateOf(false) }
 
     var newCameraName by remember { mutableStateOf("") }
+    var newLocationName by remember { mutableStateOf("") }
     var manualName by remember { mutableStateOf("") }
     var manualEEID by remember { mutableStateOf("") }
 
@@ -52,6 +56,33 @@ fun SettingsView(
             if (importedAssociates.isNotEmpty()) {
                 val combined = (associates + importedAssociates).distinctBy { it.eeid }
                 onAssociatesSaved(combined)
+            }
+        }
+    }
+
+    // --- JSON CONFIG EXPORT LAUNCHER ---
+    val exportConfigLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        uri?.let {
+            val success = ConfigManager.exportConfig(context, it, settings, associates)
+            if (success) {
+                Toast.makeText(context, "Config Exported Successfully!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Export Failed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // --- JSON CONFIG IMPORT LAUNCHER ---
+    val importConfigLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let {
+            val importedData = ConfigManager.importConfig(context, it)
+            if (importedData != null) {
+                // Reactive UI: When we call these, MainActivity automatically saves them to SharedPreferences!
+                onSettingsSaved(importedData.settings)
+                onAssociatesSaved(importedData.associates)
+                Toast.makeText(context, "Config Imported Successfully!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Import Failed or Invalid File.", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -88,7 +119,8 @@ fun SettingsView(
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             item {
-                // ... existing code ...
+                Text("General Settings", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = settings.storeNumber,
                     onValueChange = { onSettingsSaved(settings.copy(storeNumber = it)) },
@@ -137,7 +169,6 @@ fun SettingsView(
 
                 HorizontalDivider(Modifier.padding(vertical = 16.dp))
             }
-// ... existing code ...         }
 
             // --- CAMERA MANIFEST ---
             item {
@@ -179,6 +210,53 @@ fun SettingsView(
                         trailingContent = {
                             IconButton(onClick = {
                                 onSettingsSaved(settings.copy(cameraPresets = settings.cameraPresets.filter { item -> item.id != camera.id }))
+                            }) {
+                                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    )
+                }
+            }
+
+            // --- LOCATION MANIFEST ---
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { locationsExpanded = !locationsExpanded }.padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Place, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Location Tags", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                        Icon(if (locationsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.ArrowDropDown, null)
+                    }
+                }
+            }
+
+            if (locationsExpanded) {
+                item {
+                    Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newLocationName,
+                            onValueChange = { newLocationName = it },
+                            label = { Text("Add Spot (e.g. Bread rack)") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        IconButton(onClick = {
+                            if (newLocationName.isNotBlank()) {
+                                onSettingsSaved(settings.copy(locationPresets = settings.locationPresets + newLocationName.trim()))
+                                newLocationName = ""
+                            }
+                        }) { Icon(Icons.Default.Add, null) }
+                    }
+                }
+                items(settings.locationPresets) { loc ->
+                    ListItem(
+                        headlineContent = { Text(loc) },
+                        trailingContent = {
+                            IconButton(onClick = {
+                                onSettingsSaved(settings.copy(locationPresets = settings.locationPresets.filter { it != loc }))
                             }) {
                                 Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
                             }
@@ -238,6 +316,41 @@ fun SettingsView(
                             }
                         }
                     )
+                }
+            }
+
+            // --- CONFIGURATION BACKUP & RESTORE ---
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Backup & Restore Config", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Save a 'Golden Config' (Associates, Locations, Cameras) to your phone, or load an existing one. Incident Logs are not affected by configuration changes.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Spacer(Modifier.height(16.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { exportConfigLauncher.launch("DocuPro_Config.json") },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Export Config") }
+
+                            Button(
+                                onClick = { importConfigLauncher.launch(arrayOf("application/json", "*/*")) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Import Config") }
+                        }
+                    }
                 }
             }
         }

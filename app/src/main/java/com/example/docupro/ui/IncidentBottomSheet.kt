@@ -1,12 +1,16 @@
 package com.example.docupro.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +25,7 @@ import com.example.docupro.models.Associate
 import com.example.docupro.models.Incident
 import com.example.docupro.models.SettingsData
 import com.example.docupro.utils.ShiftUtils
+import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,20 +38,29 @@ fun IncidentBottomSheet(
     onSave: (Incident) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
+
+    // Wizard Step State
+    var currentStep by remember { mutableIntStateOf(1) }
+
+    // Auto-scroll downwards when a new step is unlocked
+    LaunchedEffect(currentStep) {
+        if (currentStep > 1) {
+            delay(150) // Wait a tiny bit for the AnimatedVisibility to start measuring its new height
+            scrollState.animateScrollTo(scrollState.maxValue, tween(500))
+        }
+    }
 
     // Evaluate Shift Time constraints
     val inShift = remember(settings) { ShiftUtils.isCurrentlyInShift(settings.shiftStart, settings.shiftEnd) }
     val canReport = inShift || settings.debugBypassShiftTime
 
-    // --- ENHANCED GHOST PROTOCOL ---
-    val activeAssociates = remember(existingIncidents, associates, settings) {
-        val shiftStart = ShiftUtils.getShiftStart(settings.shiftStart)
-        val shiftEnd = ShiftUtils.getShiftEnd(settings.shiftStart, settings.shiftEnd)
-
+    // --- ENHANCED GHOST PROTOCOL (Fixed 14-Hour Window) ---
+    val activeAssociates = remember(existingIncidents, associates) {
+        val cutoff = LocalDateTime.now().minusHours(14)
         val terminatedIds = existingIncidents.filter {
             it.action == "Dismissal from Work" &&
-                    LocalDateTime.parse(it.timestamp).isAfter(shiftStart) &&
-                    LocalDateTime.parse(it.timestamp).isBefore(shiftEnd)
+                    try { LocalDateTime.parse(it.timestamp).isAfter(cutoff) } catch(e: Exception) { false }
         }.map { it.associateId }.toSet()
 
         associates.filter { it.name.isNotBlank() && it.id !in terminatedIds }
@@ -56,7 +70,7 @@ fun IncidentBottomSheet(
     var violationType by remember { mutableStateOf("OSHA") }
 
     // --- NARRATIVE BUILDER STATES ---
-    var reportMode by remember { mutableStateOf("Reported") } // Default to Reported as requested
+    var reportMode by remember { mutableStateOf("Reported") }
     var manualDetails by remember { mutableStateOf("") }
     var reporterName by remember { mutableStateOf("") }
     var actionObserved by remember { mutableStateOf("") }
@@ -77,13 +91,11 @@ fun IncidentBottomSheet(
     val historyCount = remember(selectedAssociateId, violationType, existingIncidents) {
         if (selectedAssociateId.isEmpty()) 0
         else existingIncidents.count {
-            // Only count previous incidents that were actually acted upon (Warn/Dismiss), not just unwitnessed logs
             it.associateId == selectedAssociateId && it.type == violationType && it.action != "Logged"
         }
     }
 
     val actionTaken = remember(historyCount, violationType, selectedAssociateId, reportMode) {
-        // If it's unwitnessed ("Reported"), we cannot issue a corrective action.
         if (reportMode == "Reported") "Logged"
         else if (selectedAssociateId.isEmpty()) "Warn"
         else when (violationType) {
@@ -93,7 +105,6 @@ fun IncidentBottomSheet(
         }
     }
 
-    // Dynamic generated string based on selected Report Type
     val generatedDetails = remember(reportMode, selectedName, reporterName, actionObserved, postAction, correctionGiven, manualDetails) {
         val rep = reporterName.ifBlank { "[Reporter]" }
         val act = actionObserved.ifBlank { "[Action]" }
@@ -147,9 +158,14 @@ fun IncidentBottomSheet(
                 Spacer(Modifier.height(32.dp))
             }
         } else {
-            Column(modifier = Modifier.padding(16.dp).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                Text("Log Incident", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(16.dp))
+            Column(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().verticalScroll(scrollState)) {
+                Text("Log Incident", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 16.dp))
+
+                // ==========================================
+                // STEP 1: IDENTITY & CATEGORY
+                // ==========================================
+                Text("1. Identity & Type", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
 
                 var expandedAssoc by remember { mutableStateOf(false) }
                 val displaySelectedName = activeAssociates.find { it.id == selectedAssociateId }?.name ?: "Select Associate"
@@ -179,141 +195,205 @@ fun IncidentBottomSheet(
                     RadioButton(selected = violationType == "Hostility", onClick = { violationType = "Hostility" })
                     Text("Hostility")
                 }
-                Spacer(Modifier.height(8.dp))
 
-                // --- NARRATIVE BUILDER UI ---
-                Text("Report Builder", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Manual", "Witnessed", "Reported", "Both").forEach { mode ->
-                        FilterChip(
-                            selected = reportMode == mode,
-                            onClick = { reportMode = mode },
-                            label = { Text(if (mode == "Both") "Reported & Witnessed" else mode) }
-                        )
-                    }
+                if (currentStep == 1) {
+                    Button(
+                        onClick = { currentStep = 2 },
+                        enabled = selectedAssociateId.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("Continue to Narrative") }
                 }
 
-                if (reportMode == "Manual") {
-                    OutlinedTextField(value = manualDetails, onValueChange = { manualDetails = it }, label = { Text("Details (What happened?)") }, modifier = Modifier.fillMaxWidth())
-                } else {
-                    if (reportMode == "Reported" || reportMode == "Both") {
-                        OutlinedTextField(value = reporterName, onValueChange = { reporterName = it }, label = { Text("Reporting Associate Name") }, modifier = Modifier.fillMaxWidth())
+                // ==========================================
+                // STEP 2: NARRATIVE BUILDER
+                // ==========================================
+                AnimatedVisibility(visible = currentStep >= 2, enter = fadeIn() + expandVertically()) {
+                    Column(Modifier.padding(top = 16.dp)) {
+                        HorizontalDivider(Modifier.padding(bottom = 16.dp))
+                        Text("2. Incident Narrative", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(8.dp))
-                    }
 
-                    OutlinedTextField(value = actionObserved, onValueChange = { actionObserved = it }, label = { Text("Action (e.g. climbing on the equipment)") }, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(8.dp))
-
-                    if (reportMode == "Reported") {
-                        OutlinedTextField(value = postAction, onValueChange = { postAction = it }, label = { Text("Status upon checking (e.g. off of the equipment)") }, modifier = Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(8.dp))
-                    }
-
-                    if (reportMode == "Witnessed" || reportMode == "Both") {
-                        OutlinedTextField(value = correctionGiven, onValueChange = { correctionGiven = it }, label = { Text("Correction Given") }, modifier = Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(8.dp))
-                    }
-
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
-                            Text("Generated Narrative Preview", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(4.dp))
-                            Text(generatedDetails, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(16.dp))
-
-                OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Literal Location (e.g. Sales Floor)") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-
-                var expandedCam by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(expanded = expandedCam, onExpandedChange = { expandedCam = !expandedCam }) {
-                    OutlinedTextField(
-                        value = cameraName, onValueChange = { cameraName = it },
-                        label = { Text("Camera Selection") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCam) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    if (settings.cameraPresets.isNotEmpty()) {
-                        ExposedDropdownMenu(expanded = expandedCam, onDismissRequest = { expandedCam = false }) {
-                            settings.cameraPresets.forEach { cam -> DropdownMenuItem(text = { Text(cam.friendlyName) }, onClick = { cameraName = cam.friendlyName; expandedCam = false }) }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedTextField(value = witnesses, onValueChange = { witnesses = it }, label = { Text("Witnesses (if any)") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(16.dp))
-
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (actionTaken == "Dismissal from Work") {
-                                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
-                                Spacer(Modifier.width(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Manual", "Witnessed", "Reported", "Both").forEach { mode ->
+                                FilterChip(
+                                    selected = reportMode == mode,
+                                    onClick = { reportMode = mode },
+                                    label = { Text(if (mode == "Both") "Reported & Witnessed" else mode) }
+                                )
                             }
-                            Text("Required Action:", fontWeight = FontWeight.Bold)
                         }
 
-                        Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (reportMode == "Manual") {
+                            OutlinedTextField(value = manualDetails, onValueChange = { manualDetails = it }, label = { Text("Details (What happened?)") }, modifier = Modifier.fillMaxWidth())
+                        } else {
+                            if (reportMode == "Reported" || reportMode == "Both") {
+                                OutlinedTextField(value = reporterName, onValueChange = { reporterName = it }, label = { Text("Reporting Associate Name") }, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(8.dp))
+                            }
+
+                            OutlinedTextField(value = actionObserved, onValueChange = { actionObserved = it }, label = { Text("Action (e.g. climbing on the equipment)") }, modifier = Modifier.fillMaxWidth())
+                            Spacer(Modifier.height(8.dp))
+
                             if (reportMode == "Reported") {
-                                // Locked state for unwitnessed reports
-                                FilterChip(
-                                    selected = true, onClick = { }, label = { Text("Logged Only (Unwitnessed)") },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer)
-                                )
-                            } else {
-                                // Normal corrective actions for Witnessed/Both/Manual
-                                val textColor = if (chipColor.value.luminance() > 0.5f) Color.Black else Color.White
-                                FilterChip(
-                                    selected = actionTaken == "Warn", onClick = { }, label = { Text("Warn") },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Warn") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Warn") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
-                                )
-                                FilterChip(
-                                    selected = actionTaken == "Dismissal from Work", onClick = { }, label = { Text("Dismiss") },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Dismissal from Work") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Dismissal from Work") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
-                                )
+                                OutlinedTextField(value = postAction, onValueChange = { postAction = it }, label = { Text("Status upon checking (e.g. off of the equipment)") }, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(8.dp))
+                            }
+
+                            if (reportMode == "Witnessed" || reportMode == "Both") {
+                                OutlinedTextField(value = correctionGiven, onValueChange = { correctionGiven = it }, label = { Text("Correction Given") }, modifier = Modifier.fillMaxWidth())
+                                Spacer(Modifier.height(8.dp))
+                            }
+
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text("Generated Narrative Preview", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(generatedDetails, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                }
                             }
                         }
-                    }
-                }
 
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = actionDetails, onValueChange = { actionDetails = it }, label = { Text("Action Notes (What was said?)") }, modifier = Modifier.fillMaxWidth())
-
-                // These dynamic questions are naturally hidden when reportMode is "Reported" because actionTaken evaluates to "Logged"
-                if (actionTaken == "Warn") {
-                    Text("Did they comply?", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = warnComplied == true, onClick = { warnComplied = true })
-                        Text("Yes")
-                        Spacer(Modifier.width(16.dp))
-                        RadioButton(selected = warnComplied == false, onClick = { warnComplied = false })
-                        Text("No")
-                    }
-                } else if (actionTaken == "Dismissal from Work") {
-                    OutlinedTextField(value = timeLeftBuilding, onValueChange = { timeLeftBuilding = it }, label = { Text("What time did they actually leave?") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                    Checkbox(checked = managerNotified, onCheckedChange = { managerNotified = it })
-                    Text("Manager Notified")
-                }
-
-                Spacer(Modifier.height(24.dp))
-                Button(
-                    onClick = {
-                        if (selectedAssociateId.isNotEmpty() && generatedDetails.isNotBlank()) {
-                            onSave(Incident(
-                                associateId = selectedAssociateId, type = violationType, details = generatedDetails, timestamp = LocalDateTime.now().toString(),
-                                location = location, action = actionTaken, actionDetails = actionDetails, cameraFriendlyName = cameraName,
-                                witnesses = witnesses, complied = if (actionTaken == "Warn") warnComplied else null,
-                                timeLeftBuilding = if (actionTaken == "Dismissal from Work") timeLeftBuilding else "", managerNotified = managerNotified
-                            ))
+                        if (currentStep == 2) {
+                            Button(
+                                onClick = { currentStep = 3 },
+                                enabled = generatedDetails.isNotBlank(),
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            ) { Text("Continue to Environment") }
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("Save Incident") }
+                    }
+                }
+
+                // ==========================================
+                // STEP 3: LOCATION & ENVIRONMENT
+                // ==========================================
+                AnimatedVisibility(visible = currentStep >= 3, enter = fadeIn() + expandVertically()) {
+                    Column(Modifier.padding(top = 16.dp)) {
+                        HorizontalDivider(Modifier.padding(bottom = 16.dp))
+                        Text("3. Environment & Witnesses", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+
+                        OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Literal Location (e.g. Sales Floor)") }, modifier = Modifier.fillMaxWidth())
+                        if (settings.locationPresets.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp, bottom = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                settings.locationPresets.forEach { preset ->
+                                    SuggestionChip(onClick = { location = preset }, label = { Text(preset) })
+                                }
+                            }
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        var expandedCam by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(expanded = expandedCam, onExpandedChange = { expandedCam = !expandedCam }) {
+                            OutlinedTextField(
+                                value = cameraName, onValueChange = { cameraName = it },
+                                label = { Text("Camera Selection") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCam) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            if (settings.cameraPresets.isNotEmpty()) {
+                                ExposedDropdownMenu(expanded = expandedCam, onDismissRequest = { expandedCam = false }) {
+                                    settings.cameraPresets.forEach { cam -> DropdownMenuItem(text = { Text(cam.friendlyName) }, onClick = { cameraName = cam.friendlyName; expandedCam = false }) }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+
+                        OutlinedTextField(value = witnesses, onValueChange = { witnesses = it }, label = { Text("Witnesses (if any)") }, modifier = Modifier.fillMaxWidth())
+
+                        if (currentStep == 3) {
+                            Button(
+                                onClick = { currentStep = 4 },
+                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+                            ) { Text("Continue to Resolution") }
+                        }
+                    }
+                }
+
+                // ==========================================
+                // STEP 4: RESOLUTION
+                // ==========================================
+                AnimatedVisibility(visible = currentStep >= 4, enter = fadeIn() + expandVertically()) {
+                    Column(Modifier.padding(top = 16.dp)) {
+                        HorizontalDivider(Modifier.padding(bottom = 16.dp))
+                        Text("4. Resolution", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (actionTaken == "Dismissal from Work") {
+                                        Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text("Required Action:", fontWeight = FontWeight.Bold)
+                                }
+
+                                Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (reportMode == "Reported") {
+                                        FilterChip(
+                                            selected = true, onClick = { }, label = { Text("Logged Only (Unwitnessed)") },
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        )
+                                    } else {
+                                        val textColor = if (chipColor.value.luminance() > 0.5f) Color.Black else Color.White
+                                        FilterChip(
+                                            selected = actionTaken == "Warn", onClick = { }, label = { Text("Warn") },
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Warn") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Warn") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
+                                        )
+                                        FilterChip(
+                                            selected = actionTaken == "Dismissal from Work", onClick = { }, label = { Text("Dismiss") },
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = if (actionTaken == "Dismissal from Work") chipColor.value else MaterialTheme.colorScheme.secondaryContainer, selectedLabelColor = if (actionTaken == "Dismissal from Work") textColor else MaterialTheme.colorScheme.onSecondaryContainer)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(value = actionDetails, onValueChange = { actionDetails = it }, label = { Text("Action Notes (What was said?)") }, modifier = Modifier.fillMaxWidth())
+
+                        if (actionTaken == "Warn") {
+                            Text("Did they comply?", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = warnComplied == true, onClick = { warnComplied = true })
+                                Text("Yes")
+                                Spacer(Modifier.width(16.dp))
+                                RadioButton(selected = warnComplied == false, onClick = { warnComplied = false })
+                                Text("No")
+                            }
+                        } else if (actionTaken == "Dismissal from Work") {
+                            OutlinedTextField(value = timeLeftBuilding, onValueChange = { timeLeftBuilding = it }, label = { Text("What time did they actually leave?") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            Checkbox(checked = managerNotified, onCheckedChange = { managerNotified = it })
+                            Text("Manager Notified")
+                        }
+
+                        Spacer(Modifier.height(24.dp))
+                        Button(
+                            onClick = {
+                                if (selectedAssociateId.isNotEmpty() && generatedDetails.isNotBlank()) {
+                                    onSave(Incident(
+                                        associateId = selectedAssociateId, type = violationType, details = generatedDetails, timestamp = LocalDateTime.now().toString(),
+                                        location = location, action = actionTaken, actionDetails = actionDetails, cameraFriendlyName = cameraName,
+                                        witnesses = witnesses, complied = if (actionTaken == "Warn") warnComplied else null,
+                                        timeLeftBuilding = if (actionTaken == "Dismissal from Work") timeLeftBuilding else "", managerNotified = managerNotified
+                                    ))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Submit Incident")
+                        }
+                    }
+                }
                 Spacer(Modifier.height(32.dp))
             }
         }
