@@ -1,6 +1,5 @@
 package com.example.docupro
 
-
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -9,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -73,6 +73,10 @@ class MainActivity : ComponentActivity() {
                             HorizontalDivider()
                             NavigationDrawerItem(label = { Text("Home") }, selected = currentScreen == "Home", onClick = { currentScreen = "Home"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Home, null) })
                             NavigationDrawerItem(label = { Text("Logs") }, selected = currentScreen == "Logs", onClick = { currentScreen = "Logs"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.AutoMirrored.Filled.List, null) })
+
+                            // NEW: Route to Network Map
+                            NavigationDrawerItem(label = { Text("Network Map") }, selected = currentScreen == "Network", onClick = { currentScreen = "Network"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Share, null) })
+
                             NavigationDrawerItem(label = { Text("Statements") }, selected = currentScreen == "Statements", onClick = { currentScreen = "Statements"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Email, null) })
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             NavigationDrawerItem(label = { Text("Settings") }, selected = currentScreen == "Settings", onClick = { currentScreen = "Settings"; scope.launch { drawerState.close() } }, icon = { Icon(Icons.Default.Settings, null) })
@@ -97,6 +101,7 @@ class MainActivity : ComponentActivity() {
                             when (currentScreen) {
                                 "Home" -> HomeDashboard(incidents)
                                 "Logs" -> LogsView (incidents, associates)
+                                "Network" -> NetworkMapScreen(incidents, associates)
                                 "Statements" -> StatementsList(incidents, associates, settings) { txt, name ->
                                     exportContent = txt
                                     createDocumentLauncher.launch(name)
@@ -155,8 +160,6 @@ fun HomeDashboard(incidents: List<Incident>) {
     }
 }
 
-// ... existing code ...
-// ... existing code ...
 @Composable
 fun LogsView(incidents: List<Incident>, associates: List<Associate>) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -166,7 +169,6 @@ fun LogsView(incidents: List<Incident>, associates: List<Associate>) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text("Incident Logs", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
 
-            // Dummy Clear Logs Button
             IconButton(onClick = {
                 android.widget.Toast.makeText(
                     context,
@@ -189,79 +191,91 @@ fun LogsView(incidents: List<Incident>, associates: List<Associate>) {
                 Text("No incidents logged yet.", color = androidx.compose.ui.graphics.Color.Gray)
             }
         } else {
+            val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
+
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
-                // QOL: Bundle reports by Associate!
                 val groupedIncidents = incidents.groupBy { it.associateId }
 
                 groupedIncidents.forEach { (associateId, associateIncidents) ->
                     val associateName = associates.find { it.id == associateId }?.name ?: "Unknown Associate"
+                    val isExpanded = expandedStates[associateId] == true
 
                     item {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .clickable { expandedStates[associateId] = !isExpanded }
                         ) {
                             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(androidx.compose.material.icons.Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
                                 Spacer(Modifier.width(8.dp))
-                                Text(associateName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                Column {
+                                    Text(associateName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Text("${associateIncidents.size} recorded incidents", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
+                                }
                                 Spacer(Modifier.weight(1f))
-                                Badge { Text("${associateIncidents.size}") }
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Toggle Expand",
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
                             }
                         }
                     }
 
-                    items(associateIncidents.sortedByDescending { it.timestamp }) { incident ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 8.dp),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(incident.type, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.weight(1f))
+                    if (isExpanded) {
+                        items(associateIncidents.sortedByDescending { it.timestamp }) { incident ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 8.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(incident.type, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Spacer(Modifier.weight(1f))
 
-                                    // Format timestamp nicely
-                                    val timeStr = try {
-                                        val dt = java.time.LocalDateTime.parse(incident.timestamp)
-                                        val formatter = java.time.format.DateTimeFormatter.ofPattern("MMM dd, HH:mm")
-                                        dt.format(formatter)
-                                    } catch (e: Exception) { incident.timestamp.take(10) }
+                                        val timeStr = try {
+                                            val dt = java.time.LocalDateTime.parse(incident.timestamp)
+                                            val formatter = java.time.format.DateTimeFormatter.ofPattern("MMM dd, HH:mm")
+                                            dt.format(formatter)
+                                        } catch (e: Exception) { incident.timestamp.take(10) }
 
-                                    Text(timeStr, style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(incident.details, style = MaterialTheme.typography.bodyMedium)
-
-                                if (incident.actionDetails.isNotBlank()) {
-                                    Spacer(Modifier.height(8.dp))
-                                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                                        Text("Notes: ${incident.actionDetails}", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                                        Text(timeStr, style = MaterialTheme.typography.bodySmall, color = androidx.compose.ui.graphics.Color.Gray)
                                     }
-                                }
 
-                                Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    // QOL: Copy to Clipboard for easy pasting into standard systems!
-                                    TextButton(
-                                        onClick = {
-                                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(incident.details))
-                                            android.widget.Toast.makeText(context, "Narrative Copied!", android.widget.Toast.LENGTH_SHORT).show()
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(incident.details, style = MaterialTheme.typography.bodyMedium)
+
+                                    if (incident.actionDetails.isNotBlank()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                            Text("Notes: ${incident.actionDetails}", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
                                         }
-                                    ) {
-                                        Text("COPY NARRATIVE", style = MaterialTheme.typography.labelSmall)
                                     }
 
-                                    FilterChip(
-                                        selected = true,
-                                        onClick = { },
-                                        label = { Text(incident.action, style = MaterialTheme.typography.labelSmall) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
-                                            selectedLabelColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                    Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(
+                                            onClick = {
+                                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(incident.details))
+                                                android.widget.Toast.makeText(context, "Narrative Copied!", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        ) {
+                                            Text("COPY NARRATIVE", style = MaterialTheme.typography.labelSmall)
+                                        }
+
+                                        FilterChip(
+                                            selected = true,
+                                            onClick = { },
+                                            label = { Text(incident.action, style = MaterialTheme.typography.labelSmall) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                                                selectedLabelColor = if (incident.action == "Dismissal from Work") MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                             }
                         }
@@ -271,13 +285,10 @@ fun LogsView(incidents: List<Incident>, associates: List<Associate>) {
         }
     }
 }
-// ... existing code ...
+
 @Composable
 fun StatementsList(incidents: List<Incident>, associates: List<Associate>, settings: SettingsData, onExport: (String, String) -> Unit) {
-    // Grab the context so we can read the asset file
     val context = androidx.compose.ui.platform.LocalContext.current
-
-    // Group incidents by active associates
     val associatesWithIncidents = associates.filter { assoc -> incidents.any { it.associateId == assoc.id } }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -285,16 +296,64 @@ fun StatementsList(incidents: List<Incident>, associates: List<Associate>, setti
             val assocIncidents = incidents.filter { it.associateId == assoc.id }
             val isDismissed = assocIncidents.any { it.action == "Dismissal from Work" }
 
-            Card(Modifier.fillMaxWidth().clickable {
-                // Pass the Context, the List of Incidents, the Associate, and Settings
-                val txt = StatementGenerator.generateCombinedStatement(context, assocIncidents, assoc, settings)
-                onExport(txt, "Combined_Statement_${assoc.name.replace(" ", "_")}.txt")
-            }) {
-                ListItem(
-                    headlineContent = { Text("Generate Statement for ${assoc.name}") },
-                    supportingContent = { Text("Contains ${assocIncidents.size} incidents ${if (isDismissed) "(Including Dismissal)" else ""}") },
-                    trailingContent = { Icon(Icons.Default.Email, null, tint = MaterialTheme.colorScheme.primary) }
-                )
+            // Calculate Day-to-Day vs Lifetime
+            val today = java.time.LocalDateTime.now().toLocalDate()
+            val todayIncidents = assocIncidents.filter {
+                try { java.time.LocalDateTime.parse(it.timestamp).toLocalDate() == today } catch(e: Exception) { false }
+            }
+
+            var expanded by remember { mutableStateOf(false) }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            Text(assoc.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Total Incidents: ${assocIncidents.size} | Today: ${todayIncidents.size}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            if (isDismissed) {
+                                Text("(Includes Dismissal from Work)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null)
+                    }
+
+                    AnimatedVisibility(visible = expanded) {
+                        Column(Modifier.padding(top = 16.dp)) {
+                            HorizontalDivider(Modifier.padding(bottom = 16.dp))
+
+                            Button(
+                                onClick = {
+                                    val txt = StatementGenerator.generateCombinedStatement(context, todayIncidents, assoc, settings)
+                                    onExport(txt, "Daily_Statement_${assoc.name.replace(" ", "_")}_$today.txt")
+                                },
+                                enabled = todayIncidents.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Email, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Generate Daily Statement (${todayIncidents.size})")
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    val txt = StatementGenerator.generateCombinedStatement(context, assocIncidents, assoc, settings)
+                                    onExport(txt, "Lifetime_Statement_${assoc.name.replace(" ", "_")}.txt")
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.List, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Generate Lifetime Statement (${assocIncidents.size})")
+                            }
+                        }
+                    }
+                }
             }
         }
     }

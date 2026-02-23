@@ -28,7 +28,7 @@ import com.example.docupro.utils.ShiftUtils
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun IncidentBottomSheet(
     associates: List<Associate>,
@@ -40,22 +40,18 @@ fun IncidentBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
 
-    // Wizard Step State
     var currentStep by remember { mutableIntStateOf(1) }
 
-    // Auto-scroll downwards when a new step is unlocked
     LaunchedEffect(currentStep) {
         if (currentStep > 1) {
-            delay(150) // Wait a tiny bit for the AnimatedVisibility to start measuring its new height
+            delay(150)
             scrollState.animateScrollTo(scrollState.maxValue, tween(500))
         }
     }
 
-    // Evaluate Shift Time constraints
     val inShift = remember(settings) { ShiftUtils.isCurrentlyInShift(settings.shiftStart, settings.shiftEnd) }
     val canReport = inShift || settings.debugBypassShiftTime
 
-    // --- ENHANCED GHOST PROTOCOL (Fixed 14-Hour Window) ---
     val activeAssociates = remember(existingIncidents, associates) {
         val cutoff = LocalDateTime.now().minusHours(14)
         val terminatedIds = existingIncidents.filter {
@@ -69,17 +65,20 @@ fun IncidentBottomSheet(
     var selectedAssociateId by remember { mutableStateOf("") }
     var violationType by remember { mutableStateOf("OSHA") }
 
-    // --- NARRATIVE BUILDER STATES ---
     var reportMode by remember { mutableStateOf("Reported") }
     var manualDetails by remember { mutableStateOf("") }
-    var reporterName by remember { mutableStateOf("") }
+    var reporterId by remember { mutableStateOf<String?>(null) }
     var actionObserved by remember { mutableStateOf("") }
     var postAction by remember { mutableStateOf("") }
     var correctionGiven by remember { mutableStateOf("") }
 
     var location by remember { mutableStateOf("") }
     var cameraName by remember { mutableStateOf("") }
-    var witnesses by remember { mutableStateOf("") }
+
+    // NEW: Witness structured tracking
+    var selectedWitnessIds by remember { mutableStateOf(setOf<String>()) }
+    var externalWitnesses by remember { mutableStateOf("") }
+
     var actionDetails by remember { mutableStateOf("") }
     var warnComplied by remember { mutableStateOf<Boolean?>(null) }
     var managerNotified by remember { mutableStateOf(false) }
@@ -87,7 +86,6 @@ fun IncidentBottomSheet(
 
     val selectedName = activeAssociates.find { it.id == selectedAssociateId }?.name ?: "[Associate]"
 
-    // --- PROGRESSIVE DISCIPLINE CALCULATIONS ---
     val historyCount = remember(selectedAssociateId, violationType, existingIncidents) {
         if (selectedAssociateId.isEmpty()) 0
         else existingIncidents.count {
@@ -105,8 +103,8 @@ fun IncidentBottomSheet(
         }
     }
 
-    val generatedDetails = remember(reportMode, selectedName, reporterName, actionObserved, postAction, correctionGiven, manualDetails) {
-        val rep = reporterName.ifBlank { "[Reporter]" }
+    val generatedDetails = remember(reportMode, selectedName, reporterId, actionObserved, postAction, correctionGiven, manualDetails) {
+        val rep = activeAssociates.find { it.id == reporterId }?.name ?: "[Reporter]"
         val act = actionObserved.ifBlank { "[Action]" }
         val postAct = postAction.ifBlank { "[Post Action]" }
         val corr = correctionGiven.ifBlank { "[Correction]" }
@@ -227,7 +225,21 @@ fun IncidentBottomSheet(
                             OutlinedTextField(value = manualDetails, onValueChange = { manualDetails = it }, label = { Text("Details (What happened?)") }, modifier = Modifier.fillMaxWidth())
                         } else {
                             if (reportMode == "Reported" || reportMode == "Both") {
-                                OutlinedTextField(value = reporterName, onValueChange = { reporterName = it }, label = { Text("Reporting Associate Name") }, modifier = Modifier.fillMaxWidth())
+                                var expandedReporter by remember { mutableStateOf(false) }
+                                val displayReporterName = activeAssociates.find { it.id == reporterId }?.name ?: "Select Reporting Associate"
+
+                                ExposedDropdownMenuBox(expanded = expandedReporter, onExpandedChange = { expandedReporter = !expandedReporter }) {
+                                    OutlinedTextField(
+                                        value = displayReporterName, onValueChange = {}, readOnly = true,
+                                        label = { Text("Reporting Associate") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedReporter) },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenu(expanded = expandedReporter, onDismissRequest = { expandedReporter = false }) {
+                                        activeAssociates.filter { it.id != selectedAssociateId }.forEach { assoc ->
+                                            DropdownMenuItem(text = { Text(assoc.name) }, onClick = { reporterId = assoc.id; expandedReporter = false })
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.height(8.dp))
                             }
 
@@ -299,9 +311,38 @@ fun IncidentBottomSheet(
                                 }
                             }
                         }
+                        Spacer(Modifier.height(16.dp))
+
+                        // NEW CHIP INTERFACE FOR WITNESSES
+                        Text("Select Witnesses (On Shift)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(4.dp))
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val availableWitnesses = activeAssociates.filter { it.id != selectedAssociateId }
+                            if (availableWitnesses.isEmpty()) {
+                                Text("No other associates currently on shift.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            } else {
+                                availableWitnesses.forEach { assoc ->
+                                    FilterChip(
+                                        selected = selectedWitnessIds.contains(assoc.id),
+                                        onClick = {
+                                            selectedWitnessIds = if (selectedWitnessIds.contains(assoc.id)) {
+                                                selectedWitnessIds - assoc.id
+                                            } else {
+                                                selectedWitnessIds + assoc.id
+                                            }
+                                        },
+                                        label = { Text(assoc.name) }
+                                    )
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
 
-                        OutlinedTextField(value = witnesses, onValueChange = { witnesses = it }, label = { Text("Witnesses (if any)") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(value = externalWitnesses, onValueChange = { externalWitnesses = it }, label = { Text("External/Additional Witnesses") }, modifier = Modifier.fillMaxWidth())
 
                         if (currentStep == 3) {
                             Button(
@@ -377,11 +418,17 @@ fun IncidentBottomSheet(
                         Button(
                             onClick = {
                                 if (selectedAssociateId.isNotEmpty() && generatedDetails.isNotBlank()) {
+
+                                    // Compile witnesses back to a string for the Statement generator
+                                    val compiledWitnesses = selectedWitnessIds.mapNotNull { id -> associates.find { it.id == id }?.name }.joinToString(", ")
+                                    val finalWitnessesString = listOf(compiledWitnesses, externalWitnesses).filter { it.isNotBlank() }.joinToString(" | ")
+
                                     onSave(Incident(
                                         associateId = selectedAssociateId, type = violationType, details = generatedDetails, timestamp = LocalDateTime.now().toString(),
                                         location = location, action = actionTaken, actionDetails = actionDetails, cameraFriendlyName = cameraName,
-                                        witnesses = witnesses, complied = if (actionTaken == "Warn") warnComplied else null,
-                                        timeLeftBuilding = if (actionTaken == "Dismissal from Work") timeLeftBuilding else "", managerNotified = managerNotified
+                                        witnesses = finalWitnessesString, complied = if (actionTaken == "Warn") warnComplied else null,
+                                        timeLeftBuilding = if (actionTaken == "Dismissal from Work") timeLeftBuilding else "", managerNotified = managerNotified,
+                                        reporterId = reporterId, witnessIds = selectedWitnessIds.toList()
                                     ))
                                 }
                             },
